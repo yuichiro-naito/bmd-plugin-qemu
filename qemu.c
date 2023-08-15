@@ -100,7 +100,7 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		}
 		flockfile(fp);
 
-		WRITE_FMT(fp, "LOCALBASE""/bin/qemu-system-%s",
+		WRITE_FMT(fp, LOCALBASE "/bin/qemu-system-%s",
 			  nvlist_get_string(pl_conf, "qemu_arch"));
 		WRITE_STR(fp, "-accel");
 		WRITE_STR(fp, "tcg");

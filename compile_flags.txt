@@ -1,2 +1,2 @@
 -I/usr/local/include
--DLOCALBASE=/usr/local
+-DLOCALBASE="/usr/local"
