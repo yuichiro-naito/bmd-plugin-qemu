@@ -336,5 +336,6 @@ PLUGIN_DESC plugin_desc = {
 	.finalize = NULL,
 	.on_status_change = NULL,
 	.parse_config = qemu_parse_config,
-	.method = &qemu_method
+	.method = &qemu_method,
+	.on_reload_config = NULL,
 };
