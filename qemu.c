@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/param.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -7,16 +8,6 @@
 #include <string.h>
 
 #include <bmd_plugin.h>
-
-#define WRITE_STR(fp, str) \
-	fwrite_unlocked(&(const char *[]) { (str) }[0], sizeof(char *), 1, (fp))
-
-#define WRITE_FMT(fp, fmt, ...)                               \
-	do {                                                  \
-		char *p;                                      \
-		asprintf(&p, (fmt), __VA_ARGS__);             \
-		fwrite_unlocked(&p, sizeof(char *), 1, (fp)); \
-	} while (0)
 
 static int
 exec_qemu(struct vm *vm, nvlist_t *pl_conf)
@@ -100,94 +91,80 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		}
 		flockfile(fp);
 
-		WRITE_FMT(fp, LOCALBASE "/bin/qemu-system-%s",
+		fprintf(fp, LOCALBASE "/bin/qemu-system-%s\n-accel\n-tcg\n",
 			  nvlist_get_string(pl_conf, "qemu_arch"));
-		WRITE_STR(fp, "-accel");
-		WRITE_STR(fp, "tcg");
-		if (nvlist_exists_string(pl_conf, "qemu_machine")) {
-			const char *mac = nvlist_get_string(pl_conf, "qemu_machine");
-			WRITE_STR(fp, "-machine");
-			WRITE_STR(fp, mac);
-		}
-		WRITE_STR(fp, "-rtc");
-		if (is_utctime(conf) == true)
-			WRITE_STR(fp, "base=utc");
-		else
-			WRITE_STR(fp, "base=localtime");
-		if (get_debug_port(conf) != NULL) {
-			WRITE_STR(fp, "-gdb");
-			WRITE_FMT(fp, "tcp::%s", get_debug_port(conf));
-		}
-		WRITE_STR(fp, "-smp");
-		WRITE_STR(fp, get_ncpu(conf));
-		WRITE_STR(fp, "-m");
-		WRITE_STR(fp, get_memory(conf));
+		if (nvlist_exists_string(pl_conf, "qemu_machine"))
+			fprintf(fp, "-machine\n%s\n",
+				nvlist_get_string(pl_conf, "qemu_machine"));
+		fprintf(fp, "-rtc\n");
+		fprintf(fp, "base=%s\n", is_utctime(conf) ? "utc" : "localtime");
+		if (get_debug_port(conf) != NULL)
+			fprintf(fp, "-gdb\ntcp::%s\n", get_debug_port(conf));
+		fprintf(fp, "-smp\n%d\n", get_ncpu(conf));
+		fprintf(fp, "-m %s\n", get_memory(conf));
 		if (get_assigned_comport(vm) == NULL) {
-			WRITE_STR(fp, "-monitor");
-			WRITE_STR(fp, "-stdio");
+			fprintf(fp, "-monitor\n-stdio\n");
 		} else if (strcasecmp(get_assigned_comport(vm), "stdio") == 0) {
-			WRITE_STR(fp, "-chardev");
-			WRITE_STR(fp, "stdio,mux=on,id=char0,signal=off");
-			WRITE_STR(fp, "-mon");
-			WRITE_STR(fp, "chardev=char0,mode=readline");
-			WRITE_STR(fp, "-serial");
-			WRITE_STR(fp, "chardev:char0");
+			fprintf(fp, "-chardev\n"
+				"stdio,mux=on,id=char0,signal=off\n"
+				"-mon\n"
+				"chardev=char0,mode=readline\n"
+				"-serial\n"
+				"chardev:char0\n");
 		} else {
-			WRITE_STR(fp, "-monitor");
-			WRITE_STR(fp, "stdio");
-			WRITE_STR(fp, "-chardev");
-			WRITE_FMT(fp, "serial,path=%s,id=char0,signal=off",
-				  get_assigned_comport(vm));
-			WRITE_STR(fp, "-serial");
-			WRITE_STR(fp, "chardev:char0");
+			fprintf(fp, "-monitor\n"
+				"stdio\n"
+				"-chardev\n"
+				"serial,path=%s,id=char0,signal=off\n"
+				"-serial\n"
+				"chardev:char0",
+				get_assigned_comport(vm));
 		}
 
-		WRITE_STR(fp, "-boot");
-		WRITE_STR(fp, is_install(conf) ? "d" : "c");
+		fprintf(fp, "-boot\n%s\n", is_install(conf) ? "d" : "c");
 
 		int i = 0;
 		DISK_CONF_FOREACH (dc, conf) {
 			char *path = get_disk_conf_path(dc);
 			char *type = get_disk_conf_type(dc);
-			WRITE_STR(fp, "-blockdev");
+			fprintf(fp, "-blockdev\n");
 			if (strncmp(path, "/dev/", 4) == 0) {
-				WRITE_FMT(fp,
-				    "node-name=blk%d,driver=raw,file.driver=host_device,file.filename=%s",
+				fprintf(fp,
+				    "node-name=blk%d,driver=raw,file.driver=host_device,file.filename=%s\n",
 				    i, path);
 			} else {
-				WRITE_FMT(fp,
-				    "node-name=blk%d,driver=file,filename=%s",
+				fprintf(fp,
+				    "node-name=blk%d,driver=file,filename=%s\n",
 				    i++, path);
 			}
-			WRITE_STR(fp, "-device");
-			WRITE_FMT(fp, "%s,drive=blk%d", type, i);
+			fprintf(fp, "-device\n");
+			fprintf(fp, "%s,drive=blk%d\n", type, i);
 			i++;
 		}
 		ic = get_iso_conf(conf);
 		if (ic != NULL) {
-			WRITE_STR(fp, "-cdrom");
-			WRITE_STR(fp, get_iso_conf_path(ic));
+			fprintf(fp, "-cdrom\n%s\n", get_iso_conf_path(ic));
 		}
 		TAPS_FOREACH (nc, vm) {
-			WRITE_STR(fp, "-nic");
-			WRITE_FMT(fp, "tap,ifname=%s", get_net_conf_tap(nc));
+			fprintf(fp, "-nic\n");
+			fprintf(fp, "tap,ifname=%s\n", get_net_conf_tap(nc));
 		}
 		if (is_fbuf_enable(conf)) {
-			WRITE_STR(fp, "-vga");
-			WRITE_STR(fp, "std");
-			WRITE_STR(fp, "-vnc");
-			WRITE_FMT(fp, ":%d", get_fbuf_port(conf) - 5900);
+			fprintf(fp, "-vga\nstd\n-vnc\n:%d\n",
+				get_fbuf_port(conf) - 5900);
 		}
 		if (is_mouse(conf)) {
-			WRITE_STR(fp, "-usb");
+			fprintf(fp, "-usb\n");
 		}
-		WRITE_STR(fp, "-name");
-		WRITE_STR(fp, get_name(conf));
-		WRITE_STR(fp, NULL);
+		fprintf(fp, "-name\n%s\n", get_name(conf));
 
 		funlockfile(fp);
 		fclose(fp);
-		args = (char **)buf;
+
+		args = split_args(buf);
+		if (args == NULL) {
+			exit(1);
+		}
 		execv(args[0], args);
 		exit(1);
 	} else {
@@ -207,7 +184,7 @@ start_qemu(struct vm *vm, nvlist_t *pl_conf)
 }
 
 static void
-cleanup_qemu(struct vm *vm, nvlist_t *pl_conf)
+cleanup_qemu(struct vm *vm, nvlist_t *pl_conf __unused)
 {
 #define VM_CLOSE_FD(fd)                \
 	do {                           \
@@ -222,11 +199,10 @@ cleanup_qemu(struct vm *vm, nvlist_t *pl_conf)
 	VM_CLOSE_FD(errfd);
 	VM_CLOSE_FD(logfd);
 #undef VM_CLOSE_FD
-	set_state(vm, TERMINATE);
 }
 
 static int
-put_command(struct vm *vm, char *cmd)
+put_command(struct vm *vm, const char *cmd)
 {
 	ssize_t rc;
 	size_t len, n;
@@ -256,19 +232,19 @@ put_command(struct vm *vm, char *cmd)
 }
 
 static int
-reset_qemu(struct vm *vm, nvlist_t *pl_conf)
+reset_qemu(struct vm *vm, nvlist_t *pl_conf __unused)
 {
 	return put_command(vm, "system_reset\n");
 }
 
 static int
-poweroff_qemu(struct vm *vm, nvlist_t *pl_conf)
+poweroff_qemu(struct vm *vm, nvlist_t *pl_conf __unused)
 {
 	return put_command(vm, "quit\n");
 }
 
 static int
-acpi_poweroff_qemu(struct vm *vm, nvlist_t *pl_conf)
+acpi_poweroff_qemu(struct vm *vm, nvlist_t *pl_conf __unused)
 {
 	return put_command(vm, "system_powerdown\n");
 }
@@ -276,7 +252,7 @@ acpi_poweroff_qemu(struct vm *vm, nvlist_t *pl_conf)
 static int
 compare_archs(const void *a, const void *b)
 {
-	return strcasecmp((const char *)a, *(const char **)b);
+	return strcasecmp((const char *)a, *(const char * const *)b);
 }
 
 static int
@@ -301,8 +277,8 @@ parse_qemu_arch(nvlist_t *config, const char *key, const char *val)
 		    "sh4eb", "sparc", "sparc64", "tricore", "unicore32",
 		    "x86_64", "xtensa", "xtensaeb" };
 
-	if ((p = bsearch(val, archs, sizeof(archs) / sizeof(archs[0]),
-		 sizeof(archs[0]), compare_archs)) == NULL)
+	if ((p = bsearch(val, archs, nitems(archs), sizeof(archs[0]),
+			 compare_archs)) == NULL)
 		return -1;
 
 	return set_conf_value(config, key, *p);
@@ -320,7 +296,7 @@ qemu_parse_config(nvlist_t *config, const char *key, const char *val)
 	return 1;
 }
 
-struct vm_method qemu_method = {
+static struct vm_method qemu_method = {
 	.name = "qemu",
 	.vm_start = start_qemu,
 	.vm_reset = reset_qemu,
