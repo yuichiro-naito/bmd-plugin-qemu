@@ -91,33 +91,36 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		}
 		flockfile(fp);
 
-		fprintf(fp, LOCALBASE "/bin/qemu-system-%s\n-accel\n-tcg\n",
+		fprintf(fp, LOCALBASE "/bin/qemu-system-%s\n-accel\ntcg\n",
 			  nvlist_get_string(pl_conf, "qemu_arch"));
 		if (nvlist_exists_string(pl_conf, "qemu_machine"))
 			fprintf(fp, "-machine\n%s\n",
 				nvlist_get_string(pl_conf, "qemu_machine"));
+		if (nvlist_exists_string(pl_conf, "qemu_cpu"))
+			fprintf(fp, "-cpu\n%s\n",
+				nvlist_get_string(pl_conf, "qemu_cpu"));
 		fprintf(fp, "-rtc\n");
 		fprintf(fp, "base=%s\n", is_utctime(conf) ? "utc" : "localtime");
+		if (nvlist_exists_string(pl_conf, "qemu_bios"))
+			fprintf(fp, "-bios\n%s\n",
+				nvlist_get_string(pl_conf, "qemu_bios"));
+		fprintf(fp, "-bios\n/usr/local/share/u-boot/u-boot-qemu-arm64/u-boot.bin\n");
 		if (get_debug_port(conf) != NULL)
 			fprintf(fp, "-gdb\ntcp::%s\n", get_debug_port(conf));
 		fprintf(fp, "-smp\n%d\n", get_ncpu(conf));
-		fprintf(fp, "-m %s\n", get_memory(conf));
+		fprintf(fp, "-m\n%s\n", get_memory(conf));
 		if (get_assigned_comport(vm) == NULL) {
-			fprintf(fp, "-monitor\n-stdio\n");
+			fprintf(fp, "-chardev\nstdio,id=mon0,mux=off\n"
+				"-mon\nchardev=mon0,mode=readline\n");
 		} else if (strcasecmp(get_assigned_comport(vm), "stdio") == 0) {
-			fprintf(fp, "-chardev\n"
-				"stdio,mux=on,id=char0,signal=off\n"
-				"-mon\n"
-				"chardev=char0,mode=readline\n"
-				"-serial\n"
-				"chardev:char0\n");
+			fprintf(fp, "-chardev\nstdio,id=mon0,mux=on\n"
+				"-mon\nchardev=mon0,mode=readline\n"
+				"-serial\nchardev:mon0\n");
 		} else {
-			fprintf(fp, "-monitor\n"
-				"stdio\n"
-				"-chardev\n"
-				"serial,path=%s,id=char0,signal=off\n"
-				"-serial\n"
-				"chardev:char0",
+			fprintf(fp, "-chardev\nstdio,id=mon0,mux=off\n"
+				"-chardev\nserial,id=char0,mux=off,path=%s\n"
+				"-mon\nchardev=mon0,mode=readline\n"
+				"-serial\nchardev:char0\n",
 				get_assigned_comport(vm));
 		}
 
@@ -126,33 +129,37 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		int i = 0;
 		DISK_CONF_FOREACH (dc, conf) {
 			char *path = get_disk_conf_path(dc);
-			char *type = get_disk_conf_type(dc);
-			fprintf(fp, "-blockdev\n");
+//			char *type = get_disk_conf_type(dc);
+			fprintf(fp, "-drive\n");
 			if (strncmp(path, "/dev/", 4) == 0) {
 				fprintf(fp,
-				    "node-name=blk%d,driver=raw,file.driver=host_device,file.filename=%s\n",
+				    "driver=raw,if=virtio,index=%d,file=%s\n",
 				    i, path);
 			} else {
 				fprintf(fp,
-				    "node-name=blk%d,driver=file,filename=%s\n",
-				    i++, path);
+				    "driver=file,if=virtio,index=%d,filename=%s\n",
+				    i, path);
 			}
-			fprintf(fp, "-device\n");
-			fprintf(fp, "%s,drive=blk%d\n", type, i);
 			i++;
 		}
 		ic = get_iso_conf(conf);
 		if (ic != NULL) {
-			fprintf(fp, "-cdrom\n%s\n", get_iso_conf_path(ic));
+			fprintf(fp, "-drive\nfile=%s,index=%d,media=cdrom\n",
+				get_iso_conf_path(ic), i++);
 		}
+		i = 0;
 		TAPS_FOREACH (nc, vm) {
-			fprintf(fp, "-nic\n");
-			fprintf(fp, "tap,ifname=%s\n", get_net_conf_tap(nc));
+			fprintf(fp, "-netdev\ntap,id=nd%d,ifname=%s\n", i,
+				get_net_conf_tap(nc));
+			fprintf(fp, "-device\nvirtio-net,netdev=nd%d\n", i);
+			i++;
 		}
 		if (is_fbuf_enable(conf)) {
-			fprintf(fp, "-vga\nstd\n-vnc\n:%d\n",
+			fprintf(fp, "-display\nvnc=:%d\n",
 				get_fbuf_port(conf) - 5900);
-		}
+		} else
+			fprintf(fp, "-nographic\n");
+
 		if (is_mouse(conf)) {
 			fprintf(fp, "-usb\n");
 		}
@@ -165,6 +172,13 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		if (args == NULL) {
 			exit(1);
 		}
+		do {
+			char **t;
+			for (t = args; *t != NULL; t++)
+				printf("%s ", *t);
+			printf("\n");
+			fflush(stdout);
+		} while (0);
 		execv(args[0], args);
 		exit(1);
 	} else {
@@ -291,6 +305,12 @@ qemu_parse_config(nvlist_t *config, const char *key, const char *val)
 		return parse_qemu_arch(config, key, val);
 
 	if (strcasecmp(key, "qemu_machine") == 0)
+		return set_conf_value(config, key, val);
+
+	if (strcasecmp(key, "qemu_cpu") == 0)
+		return set_conf_value(config, key, val);
+
+	if (strcasecmp(key, "qemu_bios") == 0)
 		return set_conf_value(config, key, val);
 
 	return 1;
