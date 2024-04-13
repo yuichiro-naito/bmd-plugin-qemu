@@ -104,10 +104,11 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		if (nvlist_exists_string(pl_conf, "qemu_bios"))
 			fprintf(fp, "-bios\n%s\n",
 				nvlist_get_string(pl_conf, "qemu_bios"));
-		fprintf(fp, "-bios\n/usr/local/share/u-boot/u-boot-qemu-arm64/u-boot.bin\n");
 		if (get_debug_port(conf) != NULL)
 			fprintf(fp, "-gdb\ntcp::%s\n", get_debug_port(conf));
-		fprintf(fp, "-smp\n%d\n", get_ncpu(conf));
+		fprintf(fp, "-smp\n%d,sockets=%d,cores=%d,threads=%d\n",
+			get_ncpu(conf), get_ncpu_sockets(conf),
+			get_ncpu_cores(conf), get_ncpu_threads(conf));
 		fprintf(fp, "-m\n%s\n", get_memory(conf));
 		if (get_assigned_comport(vm) == NULL) {
 			fprintf(fp, "-chardev\nstdio,id=mon0,mux=off\n"
@@ -144,7 +145,7 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		}
 		ic = get_iso_conf(conf);
 		if (ic != NULL) {
-			fprintf(fp, "-drive\nfile=%s,index=%d,media=cdrom\n",
+			fprintf(fp, "-drive\ndriver=file,index=%d,media=cdrom,file=%s\n",
 				get_iso_conf_path(ic), i++);
 		}
 		i = 0;
@@ -155,7 +156,7 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 			i++;
 		}
 		if (is_fbuf_enable(conf)) {
-			fprintf(fp, "-display\nvnc=:%d\n",
+			fprintf(fp, "-display\nvnc=:%d,password=on\n",
 				get_fbuf_port(conf) - 5900);
 		} else
 			fprintf(fp, "-nographic\n");
