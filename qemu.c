@@ -146,7 +146,7 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		ic = get_iso_conf(conf);
 		if (ic != NULL) {
 			fprintf(fp, "-drive\ndriver=file,index=%d,media=cdrom,file=%s\n",
-				get_iso_conf_path(ic), i++);
+				i++, get_iso_conf_path(ic));
 		}
 		i = 0;
 		TAPS_FOREACH (nc, vm) {
