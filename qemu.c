@@ -335,4 +335,7 @@ PLUGIN_DESC plugin_desc = {
 	.parse_config = qemu_parse_config,
 	.method = &qemu_method,
 	.on_reload_config = NULL,
+	.loader_method = NULL,
+	.prestart = NULL,
+	.poststop = NULL,
 };
