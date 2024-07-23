@@ -5,7 +5,7 @@ CFLAGS+=	-I${LOCALBASE}/include -DLOCALBASE=\"${LOCALBASE}\"
 LIBDIR=		${LOCALBASE}/libexec/bmd
 SRCS=		qemu.c
 MAN=		bmd-plugin-qemu.8
-MANDIR=		$(LOCALBASE)/man/man
+MANDIR=		$(LOCALBASE)/share/man/man
 
 WARNS?=		6
 
