@@ -27,54 +27,17 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		       (strcasecmp(get_assigned_comport(vm), "stdio") != 0));
 
 	if (dopipe) {
-		if (pipe(infd) < 0) {
-			return -1;
-		}
-		if (pipe(outfd) < 0) {
-			close(infd[0]);
-			close(infd[1]);
-			return -1;
-		}
-
-		if (pipe(errfd) < 0) {
-			close(infd[0]);
-			close(infd[1]);
-			close(outfd[0]);
-			close(outfd[1]);
-			return -1;
-		}
+		if (pipe(infd) < 0)
+			goto err0;
+		if (pipe(outfd) < 0)
+			goto err1;
+                if (pipe(errfd) < 0)
+			goto err2;
 	}
 
-	pid = fork();
-	if (pid > 0) {
-		/* parent process */
-		if (dopipe) {
-			close(infd[1]);
-			close(outfd[1]);
-			close(errfd[1]);
-			set_infd(vm, infd[0]);
-			set_outfd(vm, outfd[0]);
-			set_errfd(vm, errfd[0]);
-			if (is_fbuf_enable(conf)) {
-				buf_size = asprintf(&buf,
-				    "set_password vnc %s\n",
-				    get_fbuf_password(conf));
-				n = 0;
-				while (n < buf_size) {
-					if ((rc = write(get_infd(vm), buf + n,
-						 buf_size - n)) < 0)
-						if (errno != EINTR &&
-						    errno != EAGAIN)
-							break;
-					if (rc > 0)
-						n += rc;
-				}
-				free(buf);
-			}
-		}
-		set_pid(vm, pid);
-		set_state(vm, RUN);
-	} else if (pid == 0) {
+        if ((pid = fork()) < 0)
+		goto err3;
+	if (pid == 0) {
 		/* child process */
 		if (dopipe) {
 			close(infd[0]);
@@ -85,10 +48,8 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 			dup2(errfd[1], 2);
 		}
 
-		fp = open_memstream(&buf, &buf_size);
-		if (fp == NULL) {
+		if ((fp = open_memstream(&buf, &buf_size)) == NULL)
 			exit(1);
-		}
 		flockfile(fp);
 
 		fprintf(fp, LOCALBASE "/bin/qemu-system-%s\n-accel\ntcg\n",
@@ -182,11 +143,46 @@ exec_qemu(struct vm *vm, nvlist_t *pl_conf)
 		} while (0);
 		execv(args[0], args);
 		exit(1);
-	} else {
-		exit(1);
 	}
 
-	return 0;
+        /* parent process */
+        if (dopipe) {
+          close(infd[1]);
+          close(outfd[1]);
+          close(errfd[1]);
+          set_infd(vm, infd[0]);
+          set_outfd(vm, outfd[0]);
+          set_errfd(vm, errfd[0]);
+          if (is_fbuf_enable(conf)) {
+            buf_size = asprintf(&buf, "set_password vnc %s\n",
+                                get_fbuf_password(conf));
+            n = 0;
+            while (n < buf_size) {
+              if ((rc = write(get_infd(vm), buf + n, buf_size - n)) < 0)
+                if (errno != EINTR && errno != EAGAIN)
+                  break;
+              if (rc > 0)
+                n += rc;
+            }
+            free(buf);
+          }
+        }
+        set_pid(vm, pid);
+        set_state(vm, RUN);
+        return 0;
+err3:
+	if (dopipe) {
+		close(errfd[0]);
+		close(errfd[1]);
+	err2:
+		close(outfd[0]);
+		close(outfd[1]);
+	err1:
+		close(infd[0]);
+		close(infd[1]);
+	}
+err0:
+	return -1;
 }
 
 static int
